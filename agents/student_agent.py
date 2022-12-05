@@ -4,6 +4,7 @@ from store import register_agent
 import sys
 from time import time
 from copy import deepcopy
+import math
 
 
 @register_agent("student_agent")
@@ -167,11 +168,61 @@ class StudentAgent(Agent):
     
         moves = self.generate_valid_moves(chess_board, my_pos, adv_pos, max_step)
 
+        initialNode = Node(moves[0])
+        
+
         # Create board states from moves, (update chess_board true false value at location of move and update my_pos to move)
     
-        print("Time taken: ", time() - start_time)
+        # print("Time taken: ", time() - start_time)
 
         # dummy return
         return moves[0]
 
+
+class Node:
+    """
+    Node for the MCTS. Stores the move applied to reach this node from its parent,
+    stats for the associated game position, children, parent and outcome
+    (outcome==none unless the position ends the game).
+    Args:
+        move: potential action in each state
+        parent: points to the parent node
+        N (int): times this position was visited.
+        Q (int): average reward (wins-losses) from this position.
+        # Q_RAVE (int): will be explained later.
+        # N_RAVE (int): will be explained later.
+        children (dict): dictionary of successive nodes.
+        outcome (int): If node is a leaf, then outcome indicates
+                       the winner, else None.
+    """
+
+    def __init__(self, move: tuple = None, parent: object = None):
+        """
+        Initialize a new node with optional move and parent and initially empty
+        children list and rollout statistics and unspecified outcome.
+        """
+        self.move = move
+        self.parent = parent
+        self.N = 0 # times this node was visited
+        self.Q = 0 # average reward from this node
+        self.children = {}
+        self.outcome = None # if node is a leaf, then outcome indicates the winner, else None
+
+    def add_children(self, children):
+        for child in children:
+            self.children[child.move] = child
+
+    def value(self, explore = 0.5):
+        """
+        Calculate the UCT of this node relative to its parent
+        Explore parameter: 
+            specifices how much the value should favor nodes that have 
+            yet to be explored versus nodes that seem to have a high win rate
+        """
+        if self.N == 0:
+            return 0 if explore == 0 else -1
+        else:
+            return self.Q / self.N + explore * math.sqrt(2 * math.log(self.parent.N) / self.N)
+
+    
 
