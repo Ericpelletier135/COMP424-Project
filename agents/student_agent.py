@@ -27,47 +27,57 @@ class StudentAgent(Agent):
         }
         self.moves = ((-1, 0), (0, 1), (1, 0), (0, -1))
         self.first_step = True
+        self.MCST = None
+        self.autoplay = True
 
     def step(self, chess_board, my_pos, adv_pos, max_step):
         start_time = time()
 
+        if(self.first_step):
+            self.MCST = MCTS(deepcopy(GameState(chess_board, my_pos, adv_pos, max_step)))
+            state = self.MCST.root_state
+            move = None
 
-        state = deepcopy(GameState(chess_board, my_pos, adv_pos, max_step))
-        move = None
+            #check if we can end the game
+            moves = state.moves_for_curr_player()
+            for n in moves:
+                tempState = deepcopy(state)
+                tempState.play(n)
+                endgame, _, _, winner = tempState.check_endgame()
+                if(endgame and winner == 1):
+                    my_pos, dir = n
+                    return n
 
-        moves = state.moves_for_curr_player()
-        for n in moves:
-            tempState = deepcopy(state)
-            tempState.play(n)
-            endgame, _, _, winner = tempState.check_endgame()
-            if(endgame and winner == 1):
-                my_pos, dir = n
-                print("attack")
-                return n
+            self.MCST.search(20.9)
+            my_pos, dir = move = self.MCST.best_move()
+            state.play(move)
+            self.first_step = False
+        else:
+            new_dir = None
+            for i in range(4):
+                if(self.MCST.root_state.chess_board[adv_pos[0]][adv_pos[1]][i] != chess_board[adv_pos[0]][adv_pos[1]][i]):
+                    new_dir = i
+            
+            # play the last players move
+            opp_move = (adv_pos, new_dir)
+            self.MCST.move(opp_move)
+
+            #check if we can end the game
+            moves = self.MCST.root_state.moves_for_curr_player()
+            for n in moves:
+                tempState = deepcopy(self.MCST.root_state)
+                tempState.play(n)
+                endgame, _, _, winner = tempState.check_endgame()
+                if(endgame and winner == 1):
+                    my_pos, dir = n
+                    return n
+
+            self.MCST.search(1)
+            my_pos, dir = move = self.MCST.best_move()
+            self.MCST.move(move)
+
+
         
-        # Check for winner
-        endgame, my_score, adv_score, winner = state.check_endgame()
-
-        if not endgame:
-            foo = MCTS(state)
-            # if(self.first_step == True):
-            #     foo.search(30)
-            #     self.first_step = False
-            # else:
-            foo.search(1.8)
-
-            my_pos, dir = move = foo.best_move()
-
-        state.play(move)
-
-        # arb_move = random.choice(state.moves_for_curr_player())
-        # my_pos, dir = arb_move
-        # while(not endgame):
-        #     moves = state.moves_for_curr_player()
-        #     print(moves)
-        #     state.play(random.choice(moves))
-        #     endgame, my_score, adv_score, winner = state.check_endgame()
-        print(time()-start_time)
         return my_pos, dir
 
 class MCTS:
@@ -80,6 +90,7 @@ class MCTS:
 
     def heuristic_choice(self, moves, state):
         nonBoarderMoves = []
+        decentMoves = []
         for move in moves:
             tempState = deepcopy(state)
             player = tempState.to_play
@@ -91,38 +102,40 @@ class MCTS:
                 else: 
                     moves.remove(move)
             else:
+                numWalls = sum(bool(x) for x in tempState.chess_board[move[0][0]][move[0][1]])
+                if(numWalls < 3):
+                    decentMoves.append(move)
                 if(move[0][0] != 0 and move[0][0] != state.size-1 and move[0][1] != 0 and move[0][1] != state.size-1):
                     nonBoarderMoves.append(move)
-        if(len(nonBoarderMoves) != 0):
+        if(len(decentMoves) != 0):
+            return random.choice(decentMoves)    
+        elif(len(nonBoarderMoves) != 0):
             return random.choice(nonBoarderMoves)
         else:
-            return random.choice(moves)
+            if(len(moves) == 1):
+                return moves[0]
+            else:
+                return random.choice(moves)
         
 
     def search(self, time_limit):
-        """
-        Search and update the tree for a limited amount of time.
-        """
         start_time = time()
         num_rollouts = 0
 
         # While time available. Can simplify given our 2 second limit?
         while time() - start_time < time_limit:
             node, state = self.select_node()
+            if(time() - start_time > time_limit): break
             outcome = self.roll_out(state)
+            if(time() - start_time > time_limit): break
             turn = state.to_play
             self.backup(node, turn, outcome)
             num_rollouts += 1
         
         self.run_time = time() - start_time       # Delete?
-        self.node_count = self.tree_size()
         self.num_rollouts = num_rollouts
-        print(num_rollouts)
 
     def select_node(self):
-        """
-        Select a node in the tree to perform one simulation.
-        """
         node = self.root
         state = deepcopy(self.root_state)
 
@@ -147,11 +160,10 @@ class MCTS:
                     if n.move == bestMove:
                         node = n
                         break
-                # node = self.heuristic_choice(max_nodes, state)   
 
             state.play(node.move)
 
-            # If child is not explored then select it. Expand children afterwards.
+            # If child is not explored then select it
             if node.N == 0:
                 return node, state
 
@@ -173,39 +185,26 @@ class MCTS:
                         if child.move == bestMove:
                             node = child
                             break
-                    # node = random.choice(childrenValues)
+
                 state.play(node.move)
         
         return node, state
 
-    @staticmethod
-    def expand(parent, state):
-        """
-        Generate the children of the passed "parent" node based on the available
-        moves in the passed gamestate and add them to the tree.
-        """
+    def expand(self, parent, state):
         children = []
 
-        # If winner has been determined the game is over and expanding is done
+        # check if the game is over
         if state.check_endgame()[0]:
             return False
 
         # Else expand chilrden
         for move in state.moves_for_curr_player():
             children.append(Node(move, parent))
-            #pprint.pprint(vars(Node(move, parent)))
-        # print(len(children))
         parent.add_children(children)
         return True
 
-    def roll_out(self, state):
-        """
-        Simulate an entirely random game from the passed state and return the winning player.
-        Input: GameState
-        Output: Winner of the game
-        """
-        
-        # While winner has not been determined
+    def roll_out(self, state):        
+        # While game is not finished
         while state.check_endgame()[0] == False:
             # get list of moves for current player
             moves = state.moves_for_curr_player()
@@ -216,22 +215,12 @@ class MCTS:
             else:
                 move = self.heuristic_choice(moves, state)
             state.play(move)
-            # print(state.check_endgame()[1:3])
+
         return state.check_endgame()[3]
 
-    @staticmethod
-    def backup(node, turn, outcome):
-        """
-        Update node statistics on the path from the passed node to the root
-        to reflect the outcome of a randomly simulated playout.
-        Input:
-            Node
-            Turn: winner turn
-            Outcome: outcome of rollout
-        Output:
-            Object:
-        """
-        
+
+    def backup(self, node, turn, outcome):
+
         # Calculate the reward for the player who just played at the node. Not next player to play.
         if outcome == 0.5: reward = 0.5
         else:
@@ -246,52 +235,30 @@ class MCTS:
                 if reward == 1: reward = 0
                 else: reward = 1
 
-    def best_move(self) -> tuple:
-            """
-            Return the best move according to the current tree.
-            Returns:
-                best move in terms of the most simulations number unless the game is over
-            """
-            if self.root_state.check_endgame()[0] == True:
-                return self.root_state.check_endgame()[0] # return GAME_OVER
+    def best_move(self):
+        if self.root_state.check_endgame()[0] == True:
+            return self.root_state.check_endgame()[0] # return GAME_OVER
 
-            # if there is a node that leads to endgame and we win, pick it
-            moves = []
-            for n in self.root.children.values():
-                print(n.move)
-                tempState = deepcopy(self.root_state)
-                player = tempState.to_play
-                tempState.play(n.move)
-                endgame, _, _, winner = tempState.check_endgame()
-                if(endgame == True):
-                    if(winner == player):
-                        print("here")
-                        return n.move
+        # choose the move of the most simulated node 
+        max_value = max(self.root.children.values(), key=lambda n: n.N).N
+        max_nodes = [n for n in self.root.children.values() if n.N == max_value]
 
-            # choose the move of the most simulated node breaking ties randomly
-            max_value = max(self.root.children.values(), key=lambda n: n.N).N
-            max_nodes = [n for n in self.root.children.values() if n.N == max_value]
-            # print(len(max_nodes))
-            moves = []
-            for node in max_nodes:
-                moves.append(node.move)
-            bestMove = self.heuristic_choice(moves, self.root_state)
-            for node in max_nodes:
-                if node.move == bestMove:
-                    bestchild = node
-                    break
-            # bestchild = self.heuristic_choice(max_nodes, self.root_state)
+        moves = []
+        for node in max_nodes:
+            moves.append(node.move)
+        bestMove = self.heuristic_choice(moves, self.root_state)
+        for node in max_nodes:
+            if node.move == bestMove:
+                bestchild = node
+                break
+        # bestchild = self.heuristic_choice(max_nodes, self.root_state)
+        
+        self.root = bestchild
 
-            return bestchild.move
+        return bestchild.move
 
-    def move(self, move: tuple) -> None:
-        """
-        Make the passed move and update the tree appropriately. It is
-        designed to let the player choose an action manually (which might
-        not be the best action).
-        Args:
-            move:
-        """
+
+    def move(self, move):
         if move in self.root.children:
             child = self.root.children[move]
             child.parent = None
@@ -304,54 +271,10 @@ class MCTS:
         self.root_state.play(move)
         self.root = Node()
 
-    def set_gamestate(self, state):
-        """
-        Set the root_state of the tree to the passed gamestate, this clears all
-        the information stored in the tree since none of it applies to the new
-        state.
-        """
-        self.root_state = deepcopy(state)
-        self.root = Node()
-
-    def statistics(self):
-        return self.num_rollouts, self.node_count, self.run_time
-
-    def tree_size(self):
-        """
-        Count nodes in tree by BFS.
-        """
-        Q = Queue()
-        count = 0
-        Q.put(self.root)
-        while not Q.empty():
-            node = Q.get()
-            count += 1
-            for child in node.children.values():
-                Q.put(child)
-        return count
 
 class Node:
-    """
-    Node for the MCTS. Stores the move applied to reach this node from its parent,
-    stats for the associated game position, children, parent and outcome
-    (outcome==none unless the position ends the game).
-    Args:
-        move: potential action in each state
-        parent: points to the parent node
-        N (int): times this position was visited.
-        Q (int): average reward (wins-losses) from this position.
-        # Q_RAVE (int): will be explained later.
-        # N_RAVE (int): will be explained later.
-        children (dict): dictionary of successive nodes.
-        outcome (int): If node is a leaf, then outcome indicates
-                       the winner, else None.
-    """
 
     def __init__(self, move: tuple = None, parent: object = None):
-        """
-        Initialize a new node with optional move and parent and initially empty
-        children list and rollout statistics and unspecified outcome.
-        """
         self.move = move
         self.parent = parent
         self.N = 0 # times this node was visited
@@ -365,22 +288,13 @@ class Node:
 
     @property
     def value(self, explore = 0.5):
-        """
-        Calculate the UCT of this node relative to its parent
-        Explore parameter: 
-            specifices how much the value should favor nodes that have 
-            yet to be explored versus nodes that seem to have a high win rate
-        """
+        # calculate UCT of node relative to parent
         if self.N == 0:
             return 0 if explore == 0 else sys.maxsize
         else:
             return self.Q / self.N + explore * math.sqrt(2 * math.log(self.parent.N) / self.N)
 
 class GameState:
-    """
-    Stores information representing the current state of a game, namely
-    the board and the current turn. Also provides functions for playing game.
-    """
 
     def __init__(self, chess_board, my_pos, adv_pos, max_step):
         self.size = len(chess_board[0])
