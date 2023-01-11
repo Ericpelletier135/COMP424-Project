@@ -5,9 +5,7 @@ import sys
 from time import time
 import random
 from copy import deepcopy
-from queue import Queue
 import math
-import pprint
 
 @register_agent("student_agent")
 class StudentAgent(Agent):
@@ -31,7 +29,6 @@ class StudentAgent(Agent):
         self.autoplay = True
 
     def step(self, chess_board, my_pos, adv_pos, max_step):
-        start_time = time()
 
         if(self.first_step):
             self.MCST = MCTS(deepcopy(GameState(chess_board, my_pos, adv_pos, max_step)))
@@ -48,7 +45,7 @@ class StudentAgent(Agent):
                     my_pos, dir = n
                     return n
 
-            self.MCST.search(20.9)
+            self.MCST.search(1.9)
             my_pos, dir = move = self.MCST.best_move()
             state.play(move)
             self.first_step = False
@@ -72,7 +69,7 @@ class StudentAgent(Agent):
                     my_pos, dir = n
                     return n
 
-            self.MCST.search(1)
+            self.MCST.search(1.9)
             my_pos, dir = move = self.MCST.best_move()
             self.MCST.move(move)
 
